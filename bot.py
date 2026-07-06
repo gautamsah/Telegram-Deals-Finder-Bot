@@ -92,21 +92,24 @@ async def load_or_create_config(bot_client: TelegramClient, user_id: int):
     
     logger.info("Looking for existing config in bot chat...")
     
-    # Search for our config message
-    async for msg in bot_client.iter_messages(user_id, search="#CONFIG_DATA"):
-        if msg.out: # Make sure it's from the bot
-            try:
-                # Extract JSON between markers
-                json_str = msg.text.split("```json")[1].split("```")[0].strip()
-                ACTIVE_CONFIG = json.loads(json_str)
-                CONFIG_MSG_ID = msg.id
-                logger.info("Loaded config from Telegram chat history!")
-                compile_keywords()
-                return
-            except Exception as e:
-                logger.warning(f"Found config message but couldn't parse it: {e}")
-    
-    # If not found, create a new one
+    try:
+        # Search for our config message
+        async for msg in bot_client.iter_messages(user_id, search="#CONFIG_DATA"):
+            if msg.out: # Make sure it's from the bot
+                try:
+                    # Extract JSON between markers
+                    json_str = msg.text.split("```json")[1].split("```")[0].strip()
+                    ACTIVE_CONFIG = json.loads(json_str)
+                    CONFIG_MSG_ID = msg.id
+                    logger.info("Loaded config from Telegram chat history!")
+                    compile_keywords()
+                    return
+                except Exception as e:
+                    logger.warning(f"Found config message but couldn't parse it: {e}")
+    except ValueError:
+        logger.warning(f"Bot could not fetch history for user {user_id}. Proceeding to create a new one.")
+        
+    # If not found or failed, create a new one
     logger.info("No config found in chat. Creating a new pinned config message...")
     await save_config(bot_client, user_id)
     compile_keywords()
@@ -159,15 +162,25 @@ async def main():
     # 1. Start Bot Client
     bot_client = TelegramClient("bot_session", api_id, api_hash)
     await bot_client.start(bot_token=bot_token)
-    logger.info("Bot Client connected.")
-
-    # Load Config from Chat
-    await load_or_create_config(bot_client, user_id)
+    bot_me = await bot_client.get_me()
+    logger.info(f"Bot Client connected as @{bot_me.username}.")
 
     # 2. Start User Client
     user_client = TelegramClient(user_session, api_id, api_hash)
     await user_client.start()
     logger.info("User Client connected.")
+    
+    # 3. Cache the User Entity for the Bot
+    # When deployed to a fresh cloud server, the bot has no memory of the user.
+    # We fix this by having the user account send a silent /start to the bot!
+    try:
+        await user_client.send_message(bot_me.username, "/start")
+        await asyncio.sleep(1) # Give Telegram a second to route the message
+    except Exception as e:
+        logger.warning(f"Failed to auto-ping bot (this is usually fine): {e}")
+
+    # Load Config from Chat
+    await load_or_create_config(bot_client, user_id)
     
     # Cache user channels
     global USER_CHANNELS

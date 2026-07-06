@@ -86,28 +86,29 @@ def find_matches(text: str) -> list[str]:
 
 # ── Config Management (Telegram Native Storage) ───────────────────────────────
 
-async def load_or_create_config(bot_client: TelegramClient, user_id: int):
+async def load_or_create_config(bot_client: TelegramClient, user_client: TelegramClient, bot_username: str, user_id: int):
     """Search the bot chat history for the #CONFIG_DATA message, or create it."""
     global ACTIVE_CONFIG, CONFIG_MSG_ID
     
     logger.info("Looking for existing config in bot chat...")
     
     try:
-        # Search for our config message
-        async for msg in bot_client.iter_messages(user_id, search="#CONFIG_DATA"):
-            if msg.out: # Make sure it's from the bot
+        # We use the USER client to search because Telegram allows Users to search, but blocks Bots!
+        # This instantly finds the config message even if there are 10,000 deal notifications in the way.
+        async for msg in user_client.iter_messages(bot_username, search="#CONFIG_DATA"):
+            if not msg.out and msg.text and "#CONFIG_DATA" in msg.text: # Make sure it's from the bot
                 try:
                     # Extract JSON between markers
                     json_str = msg.text.split("```json")[1].split("```")[0].strip()
                     ACTIVE_CONFIG = json.loads(json_str)
-                    CONFIG_MSG_ID = msg.id
+                    CONFIG_MSG_ID = msg.id # Message IDs are exactly the same for both bot and user
                     logger.info("Loaded config from Telegram chat history!")
                     compile_keywords()
                     return
                 except Exception as e:
                     logger.warning(f"Found config message but couldn't parse it: {e}")
     except ValueError:
-        logger.warning(f"Bot could not fetch history for user {user_id}. Proceeding to create a new one.")
+        logger.warning(f"Could not fetch history. Proceeding to create a new one.")
         
     # If not found or failed, create a new one
     logger.info("No config found in chat. Creating a new pinned config message...")
@@ -179,8 +180,8 @@ async def main():
     except Exception as e:
         logger.warning(f"Failed to auto-ping bot (this is usually fine): {e}")
 
-    # Load Config from Chat
-    await load_or_create_config(bot_client, user_id)
+    # Load Config from Chat using the new search method
+    await load_or_create_config(bot_client, user_client, bot_me.username, user_id)
     
     # Cache user channels
     global USER_CHANNELS

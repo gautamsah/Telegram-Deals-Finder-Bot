@@ -401,9 +401,25 @@ async def main():
             await event.edit(buttons=build_channel_buttons(page))
             await event.answer("Saved!")
 
-    # ── Run Forever ───────────────────────────────────────────────────────────
+    # ── Run Forever (With Dummy Web Server for Free Cloud Hosts) ──────────────
     print(Fore.GREEN + "\nBot is online and ready!" + Style.RESET_ALL)
     print("Send /help to your bot in Telegram to get started.\n")
+    
+    # Render requires a web server to bind to the PORT environment variable
+    # We create a simple HTTP server that returns "Bot is running!"
+    from aiohttp import web
+    async def health_check(request):
+        return web.Response(text="Bot is running!")
+    
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Dummy Web Server running on port {port} (for keep-alive pings)")
     
     await asyncio.gather(
         bot_client.run_until_disconnected(),

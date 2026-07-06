@@ -1,112 +1,72 @@
-# 🚀 Detailed Cloud Deployment Guide (24/7 Free Hosting)
+# 🚀 Free Cloud Deployment Guide (24/7 Hosting)
 
-This guide walks you through the exact, step-by-step process of hosting your Deals Bot for free on **Render.com** using **GitHub**. This ensures your bot runs 24/7 in the cloud without keeping your personal computer turned on.
+You noticed that Render removed their free tier for "Background Workers." You are correct! Because platforms like Vercel and Netlify are "Serverless" (they immediately kill your code after loading a webpage), they **cannot** run Telegram bots that need a constant 24/7 connection.
+
+To bypass Render's limits and host this bot 100% for free, we use the **"Dummy Web Server Workaround"**. 
+I have updated your `bot.py` to include a tiny fake web server. Render will think you are hosting a website (which they allow for free), and we will use a free pinging service to prevent Render from putting it to sleep!
 
 ---
 
 ## 🛠️ Step 1: Generate Your Cloud Session (On Your PC)
 
-Before we upload anything to the internet, we need to log in to Telegram on your local PC and generate a special "session key". This key tells the cloud server that it's allowed to read your channels.
-
-1. Open your terminal (Command Prompt or PowerShell) and navigate to the `Deals Telegram Bot` folder.
-2. Run the setup script:
-   ```bash
-   python setup.py
-   ```
-3. The script will ask you for 4 pieces of information:
-   - **API ID**: Get this from [my.telegram.org](https://my.telegram.org) (under API development tools).
-   - **API Hash**: Get this from the same place.
-   - **Bot Token**: Get this by messaging `@BotFather` on Telegram and typing `/newbot`.
-   - **User ID**: Get this by messaging `@userinfobot` on Telegram and copying the numeric ID.
-4. **Log in to Telegram**: The script will ask for your phone number (include your country code, e.g., `+91...`). Telegram will send a login code to your Telegram app. Type that code into the terminal.
-5. The script will finish and output a massive block of text labeled **`TELEGRAM_STRING_SESSION`**. 
-   > ⚠️ **Copy this string and paste it in a Notepad file immediately!** This is your master key. Never share it publicly.
+1. Open your terminal and run `python setup.py`
+2. Follow the prompts to log in.
+3. Copy the huge **`TELEGRAM_STRING_SESSION`** it prints out. Keep it safe!
 
 ---
 
 ## 🐙 Step 2: Push Your Code to GitHub
 
-Render.com needs a place to download your code from. GitHub is the easiest way.
-
-### Option A: Using the GitHub Website (Easiest for Beginners)
-1. Go to [GitHub.com](https://github.com) and create a free account (if you don't have one).
-2. Look for the **"+"** icon in the top right corner and click **"New repository"**.
-3. Fill in the details:
-   - **Repository name**: `deals-notification-bot` (or whatever you prefer)
-   - **Visibility**: Select **Private** (Important: Keep it private so no one copies your code).
-   - Uncheck "Add a README file".
-   - Click **Create repository**.
-4. You will see a screen titled "Quick setup". Look for the link that says **"uploading an existing file"** and click it.
-5. Drag and drop ONLY the following files from your PC into the GitHub window:
+1. Go to [GitHub.com](https://github.com) and create a **New Private Repository** (e.g., `deals-bot`).
+2. Upload these files to GitHub:
    - `bot.py`
    - `requirements.txt`
    - `README.md`
-   - `IMPLEMENTATION.md`
    - `DEPLOYMENT.md`
-   > 🚨 **DO NOT UPLOAD `.env` or `setup.py`!** These contain your passwords. Keep them on your PC only.
-6. Scroll down and click the green **"Commit changes"** button.
+   *(Do NOT upload your `.env` or `setup.py`!)*
 
 ---
 
-## ☁️ Step 3: Deploy on Render.com
+## ☁️ Step 3: Deploy on Render.com (As a Web Service)
 
-Now we connect Render to your GitHub so it can run your Python code.
-
-1. Go to [Render.com](https://render.com) and sign up using the **"GitHub"** button.
-2. Once logged in, click the **"New"** button in the top right dashboard.
-3. Select **"Background Worker"** from the dropdown menu.
-   > *Why Background Worker?* Render has "Web Services" which go to sleep after 15 minutes of inactivity. Background Workers run continuously 24/7, making them perfect for Telegram bots.
-4. On the next screen, look under "Connect a repository" and click your `deals-notification-bot` repository. (You may need to click "Configure account" to give Render permission to see your private GitHub repos).
-5. You are now on the configuration page. Fill it out exactly like this:
-   - **Name**: `DealsBot-Worker`
-   - **Region**: (Leave as default)
-   - **Branch**: `main` (or `master`)
+1. Go to [Render.com](https://render.com) and sign in with GitHub.
+2. Click **New** and select **"Web Service"** (NOT Background Worker).
+3. Connect your `deals-bot` repository.
+4. Fill out the configuration exactly like this:
+   - **Name**: `DealsBot`
    - **Runtime**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `python bot.py`
-   - **Instance Type**: Select the **Free** tier (0.1 CPU, 512MB RAM).
+   - **Instance Type**: **Free**
+
+5. Scroll down to **Environment Variables** and add your 5 secrets:
+   - `TELEGRAM_API_ID`
+   - `TELEGRAM_API_HASH`
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_USER_ID`
+   - `TELEGRAM_STRING_SESSION`
+
+6. Click **Create Web Service**. 
+7. Wait 3-4 minutes. At the top left of the Render dashboard, you will see a URL generated for you (e.g., `https://dealsbot-abc1.onrender.com`). **Copy this URL.**
 
 ---
 
-## 🔐 Step 4: Add Your Secret Environment Variables
+## ⏰ Step 4: The Keep-Alive Trick (Crucial!)
 
-Scroll down the configuration page until you see the **Environment Variables** section. Click **"Add Environment Variable"**. 
+Render's free Web Services go to sleep if no one visits their URL for 15 minutes. To keep your bot awake 24/7:
 
-You must add **5 variables** here. The names must be exact, and the values should be pasted from your Notepad file (the ones you got in Step 1).
+1. Go to [cron-job.org](https://cron-job.org) (or UptimeRobot.com) and create a free account.
+2. Click **Create Cronjob**.
+3. **URL**: Paste the Render URL you copied in Step 3.
+4. **Execution schedule**: Set it to run **every 14 minutes**.
+5. Click **Create**.
 
-| Key | Value (Example) |
-|-----|-----------------|
-| `TELEGRAM_API_ID` | `1234567` |
-| `TELEGRAM_API_HASH` | `abcdef1234567890abcdef` |
-| `TELEGRAM_BOT_TOKEN` | `1234567890:ABCdefGhIJKlm...` |
-| `TELEGRAM_USER_ID` | `123456789` |
-| `TELEGRAM_STRING_SESSION` | `1Bjwxyz... (the massive string from Step 1)` |
-
-*Ensure there are no extra spaces at the beginning or end of your values.*
+**Done!** The cron job will now "visit" your bot's fake web server every 14 minutes. Render will think you have active website traffic, and it will never put your bot to sleep. Your Telegram Bot will run 24/7 entirely for free!
 
 ---
 
-## 🎉 Step 5: Start the Bot
+## 🌟 Alternative Platform: Koyeb
 
-1. Scroll to the very bottom and click **Create Background Worker**.
-2. Render will take you to a dashboard with a black terminal window (Logs).
-3. Wait 2-3 minutes while Render downloads Python, installs `telethon` (from your requirements.txt), and starts the bot.
-4. Watch the logs. When you see this line:
-   ```
-   [INFO] User Client connected.
-   Bot is online and ready!
-   ```
-   **You are officially deployed!** 🥳
-
----
-
-## 📱 Step 6: Control Your Bot from Telegram
-
-Now that the bot is running in the cloud 24/7, you can close your PC. 
-
-Pick up your phone, open Telegram, and search for the bot you created with `@BotFather`.
-1. Send `/start` or `/help` to wake up the menu.
-2. Send `/channels` to see all your channels. Tap the inline buttons to turn monitoring ON for specific channels.
-3. Send `/add_keyword deal` to add keywords.
-
-*(Remember: Whenever you change a setting here, the bot saves it inside the chat history, so your settings are safe even if Render restarts the server tomorrow!)*
+If you don't want to use the Render workaround, the best alternative right now is **[Koyeb.com](https://koyeb.com)**.
+Koyeb offers an "Eco Free Tier" that natively supports Docker containers and Background Workers running 24/7 without needing the ping trick! 
+To deploy there: Just connect GitHub, select your repo, set the Run Command to `python bot.py`, and add the exact same 5 Environment Variables.

@@ -21,7 +21,8 @@ from datetime import datetime
 # ── Dependency check ──────────────────────────────────────────────────────────
 try:
     from telethon import TelegramClient, events, Button
-    from telethon.tl.types import PeerChannel, Channel
+    from telethon.tl.types import PeerChannel, Channel, BotCommand, BotCommandScopeDefault
+    from telethon.tl.functions.bots import SetBotCommandsRequest
     from telethon.sessions import StringSession
     from dotenv import load_dotenv
     from colorama import Fore, Style, init as colorama_init
@@ -47,7 +48,8 @@ ACTIVE_CONFIG = {
     "keywords": ["deal", "off", "discount", "free", "sale"],
     "settings": {
         "cooldown_seconds": 15,
-        "min_keyword_matches": 1
+        "min_keyword_matches": 1,
+        "auto_clean": True
     }
 }
 CONFIG_MSG_ID = None
@@ -146,6 +148,34 @@ async def save_config(bot_client: TelegramClient, user_id: int):
             
     compile_keywords()
 
+# ── Auto-Cleanup Task ─────────────────────────────────────────────────────────
+
+async def auto_clean_chat(bot_client: TelegramClient, user_id: int):
+    """Runs in the background and ensures the chat doesn't exceed 200 messages."""
+    while True:
+        await asyncio.sleep(3600) # Run every hour
+        if not ACTIVE_CONFIG["settings"].get("auto_clean", True):
+            continue
+            
+        try:
+            count = 0
+            to_delete = []
+            
+            # Fetch all messages from newest to oldest
+            async for msg in bot_client.iter_messages(user_id):
+                count += 1
+                # If we've passed 200 messages, start marking for deletion
+                if count > 200 and msg.id != CONFIG_MSG_ID:
+                    to_delete.append(msg.id)
+            
+            if to_delete:
+                # Telegram allows deleting up to 100 messages at once
+                for i in range(0, len(to_delete), 100):
+                    await bot_client.delete_messages(user_id, to_delete[i:i+100])
+                logger.info(f"Auto-cleaned {len(to_delete)} old messages.")
+        except Exception as e:
+            logger.error(f"Auto-clean error: {e}")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 async def main():
@@ -165,6 +195,26 @@ async def main():
     await bot_client.start(bot_token=bot_token)
     bot_me = await bot_client.get_me()
     logger.info(f"Bot Client connected as @{bot_me.username}.")
+    
+    # Register the Slash Commands menu with Telegram
+    try:
+        commands = [
+            BotCommand(command="channels", description="Select channels to monitor"),
+            BotCommand(command="keywords", description="Manage keywords"),
+            BotCommand(command="add_keyword", description="Add a new keyword"),
+            BotCommand(command="remove_keyword", description="Remove a keyword"),
+            BotCommand(command="status", description="See current status"),
+            BotCommand(command="clear_chat", description="Delete old deals"),
+            BotCommand(command="toggle_cleanup", description="Turn auto-delete on/off"),
+            BotCommand(command="help", description="Show all commands"),
+        ]
+        await bot_client(SetBotCommandsRequest(
+            scope=BotCommandScopeDefault(),
+            lang_code='',
+            commands=commands
+        ))
+    except Exception as e:
+        logger.warning(f"Failed to register slash commands menu: {e}")
 
     # 2. Start User Client
     user_client = TelegramClient(user_session, api_id, api_hash)
@@ -263,9 +313,22 @@ async def main():
             "➖ **/remove_keyword <word>** — Remove a keyword\n"
             "🧹 **/clear_channels** — Stop monitoring all channels\n"
             "🧹 **/clear_keywords** — Remove all keywords\n"
+            "🗑️ **/clear_chat** — Delete all old deals (keeps config safe!)\n"
+            "⚙️ **/toggle_cleanup** — Turn auto-delete on/off\n"
             "📊 **/status** — See what I am currently doing"
         )
         await event.reply(text)
+
+    @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/toggle_cleanup$"))
+    async def cmd_toggle_cleanup(event):
+        current = ACTIVE_CONFIG["settings"].get("auto_clean", True)
+        ACTIVE_CONFIG["settings"]["auto_clean"] = not current
+        await save_config(bot_client, user_id)
+        
+        if not current:
+            await event.reply("✅ Auto-cleanup is now **ON**.\nI will automatically keep only the top 200 deals in the chat.")
+        else:
+            await event.reply("❌ Auto-cleanup is now **OFF**.\nI will let your chat history grow forever.")
 
     @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/status$"))
     async def cmd_status(event):
@@ -286,27 +349,56 @@ async def main():
 
     @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/add_keyword (.*)"))
     async def cmd_add_keyword(event):
-        kw = event.pattern_match.group(1).strip().lower()
-        if kw in [k.lower() for k in ACTIVE_CONFIG["keywords"]]:
-            await event.reply(f"⚠️ Keyword `{kw}` is already in the list.")
-            return
+        raw_kws = event.pattern_match.group(1).split(",")
+        added = []
+        skipped = []
+        
+        for kw in raw_kws:
+            kw = kw.strip().lower()
+            if not kw: continue
+            if kw in [k.lower() for k in ACTIVE_CONFIG["keywords"]]:
+                skipped.append(kw)
+            else:
+                ACTIVE_CONFIG["keywords"].append(kw)
+                added.append(kw)
+                
+        if added:
+            await save_config(bot_client, user_id)
             
-        ACTIVE_CONFIG["keywords"].append(kw)
-        await save_config(bot_client, user_id)
-        await event.reply(f"✅ Added keyword: `{kw}`")
+        msg = ""
+        if added: msg += f"✅ Added: {', '.join(added)}\n"
+        if skipped: msg += f"⚠️ Already existed: {', '.join(skipped)}"
+        if not msg: msg = "⚠️ No valid keywords provided."
+        
+        await event.reply(msg.strip())
 
     @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/remove_keyword (.*)"))
     async def cmd_remove_keyword(event):
-        kw = event.pattern_match.group(1).strip().lower()
-        lower_kws = [k.lower() for k in ACTIVE_CONFIG["keywords"]]
+        raw_kws = event.pattern_match.group(1).split(",")
+        removed = []
+        skipped = []
         
-        if kw in lower_kws:
-            idx = lower_kws.index(kw)
-            removed = ACTIVE_CONFIG["keywords"].pop(idx)
+        for kw in raw_kws:
+            kw = kw.strip().lower()
+            if not kw: continue
+            
+            lower_kws = [k.lower() for k in ACTIVE_CONFIG["keywords"]]
+            if kw in lower_kws:
+                idx = lower_kws.index(kw)
+                removed_kw = ACTIVE_CONFIG["keywords"].pop(idx)
+                removed.append(removed_kw)
+            else:
+                skipped.append(kw)
+                
+        if removed:
             await save_config(bot_client, user_id)
-            await event.reply(f"✅ Removed keyword: `{removed}`")
-        else:
-            await event.reply(f"⚠️ Keyword `{kw}` not found.")
+            
+        msg = ""
+        if removed: msg += f"✅ Removed: {', '.join(removed)}\n"
+        if skipped: msg += f"⚠️ Not found: {', '.join(skipped)}"
+        if not msg: msg = "⚠️ No valid keywords provided."
+        
+        await event.reply(msg.strip())
 
     @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/clear_keywords$"))
     async def cmd_clear_keywords(event):
@@ -330,6 +422,28 @@ async def main():
         text = "**Current Keywords:**\n" + ", ".join(f"`{k}`" for k in kws)
         text += "\n\n_Use /add_keyword <word> or /remove_keyword <word> to edit._"
         await event.reply(text)
+
+    @bot_client.on(events.NewMessage(chats=[user_id], pattern=r"^/clear_chat$"))
+    async def cmd_clear_chat(event):
+        await event.reply("🧹 Sweeping chat... this might take a few seconds.")
+        deleted = 0
+        
+        # We fetch messages but protect the CONFIG_MSG_ID
+        async for msg in bot_client.iter_messages(user_id):
+            if msg.id != CONFIG_MSG_ID and msg.id != event.id:
+                try:
+                    await msg.delete()
+                    deleted += 1
+                except Exception:
+                    pass
+                    
+        # Delete the command message and the reply as well
+        await event.delete()
+        
+        # Send a temporary success message and delete it after 3 seconds
+        success_msg = await bot_client.send_message(user_id, f"✅ Cleaned up {deleted} old messages! (Config was kept safe)")
+        await asyncio.sleep(4)
+        await success_msg.delete()
 
     # ── Channel Selector GUI ──────────────────────────────────────────────────
     
@@ -434,6 +548,9 @@ async def main():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"Dummy Web Server running on port {port} (for keep-alive pings)")
+    
+    # Start the background cleanup task
+    asyncio.create_task(auto_clean_chat(bot_client, user_id))
     
     await asyncio.gather(
         bot_client.run_until_disconnected(),

@@ -32,10 +32,12 @@ Once running, you can talk to your bot directly to manage everything:
 | `/channels` | Gives you an interactive menu with **inline buttons** to tap and toggle your channels ON/OFF |
 | `/status` | Shows how many channels and keywords are active |
 | `/keywords` | Lists your current keywords |
-| `/add_keyword <word>` | Adds a new keyword to watch |
-| `/remove_keyword <word>` | Removes a keyword |
+| `/add_keyword <word1, word2>` | Adds new keywords to watch (supports comma-separated lists) |
+| `/remove_keyword <word1, word2>` | Removes keywords (supports comma-separated lists) |
 | `/clear_channels` | Instantly stops watching all channels |
 | `/clear_keywords` | Removes all keywords |
+| `/clear_chat` | 🗑️ Manually deletes all old deal notifications (keeps your settings safe) |
+| `/toggle_cleanup` | ⚙️ Turns the 24/7 background Auto-Cleaner ON or OFF |
 
 ---
 
